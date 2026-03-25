@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Operations Utilisation Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/papaparse"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{font-family:Arial;background:#f4f6fb;margin:0}
+.header{background:#1c3f72;color:white;padding:20px 12px;display:flex;align-items:center;justify-content:center;position:relative;}
+.logo-box{position:absolute;left:15px;height:100%;display:flex;align-items:center;}
+.logo{max-height:75px}
+.header-text{text-align:center}
+.header-text h1{margin:0;font-size:16px}
+.header-text h2{margin:5px 0;font-size:28px}
+.header-text p{margin:0;font-size:13px}
+#drop{margin:15px;padding:22px;border:2px dashed #888;text-align:center;background:white;border-radius:10px;cursor:pointer;}
+.status-row{display:flex;justify-content:space-between;padding:0 15px;}
+.bar-bg{height:12px;background:#ddd;margin:10px 15px;border-radius:8px;}
+.bar{height:100%;width:0;background:#1976d2;border-radius:8px;}
+.kpis{display:flex;gap:14px;padding:18px}
+.kpi{flex:1;padding:20px;color:white;text-align:center;border-radius:12px;cursor:pointer}
+.kpi-title{font-size:18px}
+.kpi-value{font-size:34px;font-weight:bold}
+.kpi-total{background:#1565C0}
+.kpi-used{background:#2e7d32}
+.kpi-rate{background:#6A1B9A}
+.kpi-error{background:#c62828}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px}
+.chart-box{background:white;padding:12px;height:280px;border-radius:12px}
+.page{display:none;padding:20px}
+table{width:100%;border-collapse:collapse;background:white;font-size:13px}
+th,td{padding:8px;border:1px solid #ddd;text-align:center}
+th{background:#1c3f72;color:white}
+.home-btn{margin-bottom:10px;padding:8px 15px;background:#1c3f72;color:white;border:none;border-radius:6px;}
+.filter-box{display:flex;gap:10px;margin-bottom:12px;}
+.filter-box select,.filter-box input{padding:6px;}
+.filter-box button{padding:6px 12px;background:#1c3f72;color:white;border:none;border-radius:5px;}
+.highlight{background:#c8e6c9}
+.success{color:green;font-weight:bold}
+.error-text{color:red;font-weight:bold}
+.count-label{font-weight:bold;margin:10px 0;}
+.pagination{margin:10px 0;}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <div class="logo-box">
+    <img src="St Vincent Logo.png" class="logo">
+  </div>
+  <div class="header-text">
+    <h1>Medical Imaging Department</h1>
+    <h2>Operations Utilisation Dashboard</h2>
+    <p>Real-time monitoring of room utilisation and workflow efficiency</p>
+  </div>
+</div>
+
+<div id="dashboard">
+<div id="drop">Click or Drag CSV File</div>
+<input type="file" id="fileInput" hidden>
+
+<div class="status-row">
+  <div id="status">Waiting</div>
+  <div id="percent">0%</div>
+</div>
+
+<div class="bar-bg"><div id="bar" class="bar"></div></div>
+
+<div class="kpis">
+  <div class="kpi kpi-total" onclick="kpiClick('totalPage')">
+    <div class="kpi-title">Total</div>
+    <div class="kpi-value" id="total">-</div>
+    <hr><div style="font-size:12px;">Click for details</div>
+  </div>
+
+  <div class="kpi kpi-used" onclick="kpiClick('successPage')">
+    <div class="kpi-title">Utilisations</div>
+    <div class="kpi-value" id="used">-</div>
+    <hr><div style="font-size:12px;">Click for details</div>
+  </div>
+
+  <div class="kpi kpi-rate" onclick="kpiClick('utilPage')">
+    <div class="kpi-title">Util %</div>
+    <div class="kpi-value" id="rate">-</div>
+    <hr><div style="font-size:12px;">Click for details</div>
+  </div>
+
+  <div class="kpi kpi-error" onclick="kpiClick('errorPage')">
+    <div class="kpi-title">Exception</div>
+    <div class="kpi-value" id="error">-</div>
+    <hr><div style="font-size:12px;">Click for details</div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="chart-box"><canvas id="c1"></canvas></div>
+  <div class="chart-box"><canvas id="c2"></canvas></div>
+  <div class="chart-box"><canvas id="c3"></canvas></div>
+  <div class="chart-box"><canvas id="c4"></canvas></div>
+</div>
+</div>
+
+<div id="totalPage" class="page"></div>
+<div id="successPage" class="page"></div>
+<div id="errorPage" class="page"></div>
+<div id="utilPage" class="page"></div>
+
+<script>
+let charts={},csvLoaded=false,globalData={},pageState={};
+
+const drop=document.getElementById("drop");
+const fileInput=document.getElementById("fileInput");
+const status=document.getElementById("status");
+const percent=document.getElementById("percent");
+const bar=document.getElementById("bar");
+const dashboard=document.getElementById("dashboard");
+
+drop.onclick=()=>fileInput.click();
+fileInput.onchange=e=>loadFile(e.target.files[0]);
+
+function kpiClick(p){
+ if(!csvLoaded){alert("Please select a CSV file first!");return;}
+ showPage(p);
+}
+
+function showPage(id){
+ dashboard.style.display="none";
+ document.querySelectorAll(".page").forEach(p=>p.style.display="none");
+ document.getElementById(id).style.display="block";
+}
+
+function goHome(){
+ dashboard.style.display="block";
+ document.querySelectorAll(".page").forEach(p=>p.style.display="none");
+}
+
+function setBar(v){
+ bar.style.width=v+"%";
+ percent.innerText=v+"%";
+ if(v===100) setStatus("Completed");
+}
+function setStatus(t){status.innerText=t;}
+
+function loadFile(file){
+ setStatus("Parsing"); setBar(20);
+ Papa.parse(file,{header:true,skipEmptyLines:true,complete:r=>process(r.data)});
+}
+
+function cleanRoom(name){
+ if(!name) return "";
+ let parts=name.split(">");
+ return parts[parts.length-1].replace(/\(.*?\)/,"").trim();
+}
+
+function process(rows){
+ setStatus("Processing"); setBar(50);
+
+ let success=0,exceptionCount=0;
+ let all=[],successList=[],errorList=[];
+ let maxMoves=0,roomCount={};
+
+ rows.forEach(row=>{
+   let bracelet=row["Bracelet"]; if(!bracelet) return;
+
+   let movements=[];
+   Object.keys(row).forEach(k=>{
+     if(k.toLowerCase().startsWith("movement")){
+       let i=k.replace(/\D/g,"");
+       let dt=new Date((row["Date"+i]||"")+" "+(row["Time"+i]||""));
+       movements.push({text:row[k],dt});
+     }
+   });
+
+   movements=movements.filter(m=>m.text && m.dt).sort((a,b)=>a.dt-b.dt);
+   maxMoves=Math.max(maxMoves,movements.length);
+
+   let roomMap={},highlight=[],totalMinutes=0;
+
+   movements.forEach((m,i)=>{
+     let match=m.text.match(/(.+?)\s*\(?\s*(Inner|Outer)\s*\)?/i);
+     if(match){
+       let room=cleanRoom(match[1]);
+       let type=match[2].toLowerCase();
+       roomMap[room]=roomMap[room]||{};
+       roomMap[room][type]={index:i,time:m.dt};
+     }
+   });
+
+   let validRooms=[];
+   Object.keys(roomMap).forEach(r=>{
+     let rec=roomMap[r];
+     if(rec.inner && rec.outer){
+       validRooms.push(r);
+       let diff=(rec.outer.time-rec.inner.time)/60000;
+       if(diff>0) totalMinutes+=diff;
+       highlight.push(rec.inner.index,rec.outer.index);
+       roomCount[r]=(roomCount[r]||0)+1;
+     }
+   });
+
+   let record={
+     bracelet,
+     history:movements.map(m=>m.text),
+     highlight,
+     status:validRooms.length?"Successful":"Exception",
+     rooms:validRooms.join(", "),
+     minutes:Math.round(totalMinutes),
+     issue:validRooms.length?"":"Missing Inner/Outer"
+   };
+
+   all.push(record);
+   validRooms.length?(success++,successList.push(record)):(exceptionCount++,errorList.push(record));
+ });
+
+ globalData={all,successList,errorList};
+
+ total.innerText=all.length;
+ used.innerText=success;
+ error.innerText=exceptionCount;
+ rate.innerText=((success/all.length)*100).toFixed(1)+"%";
+
+ buildPage("totalPage","All Records","all",maxMoves,false);
+ buildPage("successPage","Successful","successList",maxMoves,true);
+ buildPage("errorPage","Exception","errorList",maxMoves,false);
+ buildPage("utilPage","Utilisation Breakdown","successList",maxMoves,true);
+
+ renderCharts(roomCount);
+ csvLoaded=true;
+ setBar(100);
+}
+
+function buildPage(id,title,dataKey,maxMoves,showMinutes){
+ pageState[id]={limit:25};
+ let data=globalData[dataKey];
+
+ let uniqueStatus=[...new Set(data.map(r=>r.status))];
+ let roomSet=new Set();
+ data.forEach(r=>{
+   if(r.rooms){
+     r.rooms.split(",").forEach(x=>roomSet.add(x.trim()));
+   }
+ });
+ let uniqueRooms=[...roomSet].filter(x=>x);
+
+ let page=document.getElementById(id);
+
+ page.innerHTML=`
+<button class="home-btn" onclick="goHome()">Back</button>
+<h3>${title}</h3>
+
+<div class="count-label" id="${id}_count"></div>
+
+<div class="pagination">
+Show:
+<select onchange="changePageSize('${id}','${dataKey}',${maxMoves},${showMinutes},this.value)">
+<option>25</option><option>50</option><option>75</option><option>100</option><option value="all">All</option>
+</select>
+</div>
+
+<div class="filter-box">
+<button onclick="resetFilters('${id}','${dataKey}',${maxMoves},${showMinutes})">Reset All</button>
+
+<select id="${id}_status" onchange="applyFilter('${id}','${dataKey}',${maxMoves},${showMinutes})">
+<option value="">Status</option>
+${uniqueStatus.map(s=>`<option>${s}</option>`).join("")}
+</select>
+
+${id==="errorPage"?"":`
+<select id="${id}_room" onchange="applyFilter('${id}','${dataKey}',${maxMoves},${showMinutes})">
+<option value="">Room</option>
+${uniqueRooms.map(r=>`<option>${r}</option>`).join("")}
+</select>`}
+
+<input id="${id}_bracelet" placeholder="Bracelet #">
+<button onclick="applyFilter('${id}','${dataKey}',${maxMoves},${showMinutes})">Search</button>
+</div>
+
+<table><thead></thead><tbody></tbody></table>`;
+
+ renderTable(id,data,maxMoves,showMinutes,data.length);
+}
+
+function resetFilters(id,dataKey,maxMoves,showMinutes){
+ document.getElementById(id+"_status").value="";
+ if(id!=="errorPage"){document.getElementById(id+"_room").value="";}
+ document.getElementById(id+"_bracelet").value="";
+ pageState[id].limit=25;
+
+ const select=document.querySelector(`#${id} .pagination select`);
+ if(select) select.value="25";
+
+ renderTable(id,globalData[dataKey],maxMoves,showMinutes,globalData[dataKey].length);
+}
+
+function changePageSize(id,dataKey,maxMoves,showMinutes,val){
+ pageState[id].limit=val==="all"?"all":parseInt(val);
+ applyFilter(id,dataKey,maxMoves,showMinutes);
+}
+
+function applyFilter(id,dataKey,maxMoves,showMinutes){
+ let status=document.getElementById(id+"_status").value;
+ let bracelet=document.getElementById(id+"_bracelet").value.toLowerCase();
+ let room=id==="errorPage"?"":document.getElementById(id+"_room").value.toLowerCase();
+
+ let fullData=globalData[dataKey];
+
+ let filtered=fullData.filter(r=>{
+   return (!status||r.status===status) &&
+          (!room||r.rooms.toLowerCase().includes(room)) &&
+          (!bracelet||r.bracelet.toLowerCase().includes(bracelet));
+ });
+
+ renderTable(id,filtered,maxMoves,showMinutes,fullData.length);
+}
+
+function renderTable(id,data,maxMoves,showMinutes,totalCount){
+ let limit=pageState[id].limit;
+ let displayData=limit==="all"?data:data.slice(0,limit);
+
+ document.getElementById(id+"_count").innerText="Showing: "+displayData.length+" / "+totalCount;
+
+ let thead=document.querySelector(`#${id} thead`);
+ let tbody=document.querySelector(`#${id} tbody`);
+
+ let headers=["Serial","Bracelet","Status"];
+ if(id==="errorPage"){headers.push("Reason of Failure");}
+ else{headers.push("Rooms");}
+
+ if(showMinutes) headers.push("Utilisation Time (mins)");
+ for(let i=1;i<=maxMoves;i++) headers.push("Move "+i);
+
+ thead.innerHTML="<tr>"+headers.map(h=>"<th>"+h+"</th>").join("")+"</tr>";
+
+ tbody.innerHTML="";
+ displayData.forEach((r,i)=>{
+   let row="<tr>";
+   row+=`<td>${i+1}</td><td>${r.bracelet}</td>`;
+   row+=`<td class="${r.status==='Successful'?'success':'error-text'}">${r.status}</td>`;
+   if(id==="errorPage"){row+=`<td>${r.issue}</td>`;}
+   else{row+=`<td>${r.rooms}</td>`;}
+   if(showMinutes) row+=`<td>${r.minutes}</td>`;
+
+   for(let j=0;j<maxMoves;j++){
+     let cls=r.highlight.includes(j)?"highlight":"";
+     row+=`<td class="${cls}">${(r.history[j]||"").split(">").pop()}</td>`;
+   }
+
+   row+="</tr>";
+   tbody.innerHTML+=row;
+ });
+}
+
+function createChart(id,type,title,labels,data,h=false){
+ if(charts[id]) charts[id].destroy();
+ charts[id]=new Chart(document.getElementById(id),{
+  type:type,
+  data:{labels:labels,datasets:[{label:title,data:data}]},
+  options:{indexAxis:h?'y':'x',responsive:true,maintainAspectRatio:false}
+ });
+}
+
+function renderCharts(roomCount){
+ let labels=Object.keys(roomCount);
+ let values=Object.values(roomCount);
+ if(!labels.length){labels=["No Data"];values=[0];}
+
+ createChart("c1","bar","Utilisation by Room",labels,values);
+ createChart("c2","doughnut","Distribution",labels,values);
+ createChart("c3","bar","Top Rooms",labels,values,true);
+ createChart("c4","line","Trend",labels,values);
+}
+</script>
+
+</body>
+</html>
